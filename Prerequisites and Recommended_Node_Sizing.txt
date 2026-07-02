@@ -1,0 +1,136 @@
+Prerequisites and Recommended Node Sizing for Cluster Setup
+•	8 servers running an Ubuntu Ubuntu 26.04 LTS OS
+•	Minimum 8 GB RAM and 2 Core CPUs on each node
+•	A root password configured on each server
+I will use the following setup to demonstrate a three-node master & three node worker Kubernetes cluster
+Kubernetes Cluster Node Information
+Server Type	Hostname	Host IP	OSName 	Spec
+Master	mstr1.aibl.com	172.21.1.167	ubuntu server 26.04LTS	8GB RAM,2vcpu
+Master	mstr2.aibl.com	172.21.1.168	ubuntu server 26.04LTS	8GB RAM,2vcpu
+Master	mstr3.aibl.com	172.21.1.169	ubuntu server 26.04LTS	8GB RAM,2vcpu
+Worker	wrk1.aibl.com	172.21.1.170	ubuntu server 26.04LTS	8GB RAM,2vcpu
+Worker	wrk2.aibl.com	172.21.1.171	ubuntu server 26.04LTS	8GB RAM,2vcpu
+Worker	wrk3.aibl.com	172.21.1.172	ubuntu server 26.04LTS	8GB RAM,4vcpu
+Proxy	HAProxy.aibl.com 172.21.1.173	ubuntu server 26.04LTS	8GB RAM,4vcpu
+Storage	Nfs.aibl.com	172.21.1.174	ubuntu server 26.04LTS	8GB RAM,4vcpu
+
+Install all the OS with required Packages
+Step 1: Setting up Static IP address on Ubuntu Server 22.04
+Login to your Ubuntu server 22.04, look for the netplan configuration file. It is located under /etc/netplan directory.
+$ cd /etc/netplan/
+$ls
+-rw-r--r-- 1 root root 116 Oct 12 04:03 00-installer-config.yaml
+
+Now, to configure static ip in place of dhcp, edit netplan configuration file using vi or nano editor and add the following content.
+
+$ sudo vi 00-installer-config.yaml
+# This is the network config written by 'subiquity'
+network:
+  ethernets:
+    enp0s3:
+          addresses:
+            - 172.21.1.15/24
+          nameservers:
+            addresses: [8.8.8.8]
+          routes:
+            - to: default
+              via: 172.21.1.1
+  version: 2
+
+save and close the file.
+
+To make above changes into the effect the apply these changes using following netplan command,
+$ sudo netplan apply
+Run following ip command to view the ip address on interface,
+$ ip addr show enp0s3
+To view the default route, run
+root@testsvr01:~# ip addr show ens160
+2: ens160: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
+    link/ether 00:0c:29:21:55:ad brd ff:ff:ff:ff:ff:ff
+    altname enp3s0
+    inet 172.21.1.15/24 brd 172.21.1.255 scope global ens160
+       valid_lft forever preferred_lft forever
+    inet6 fe80::20c:29ff:fe21:55ad/64 scope link
+       valid_lft forever preferred_lft forever
+
+$ ip route show
+root@testsvr01:~# ip route show
+default via 172.21.1.1 dev ens160 proto static
+172.21.1.0/24 dev ens160 proto kernel scope link src 172.21.1.15
+Step 3: Check the OS, Hardware Configurations & Network connectivity (Passwordless ssh)
+
+Access all VMs
+Here we create an SSH key pair for the vagrant user who we are logged in as. We will copy the public key 
+of this pair to the other master and both workers to permit us to use password-less SSH (and SCP) go get from master-1 to these other nodes  
+root@mstr1:~# ssh-keygen
+Generating public/private rsa key pair.
+Enter file in which to save the key (/root/.ssh/id_rsa):
+Enter passphrase (empty for no passphrase):
+Enter same passphrase again:
+Your identification has been saved in /root/.ssh/id_rsa
+Your public key has been saved in /root/.ssh/id_rsa.pub
+The key fingerprint is:
+SHA256:SH/ZS1lbO12cvH/iqIsrqfptsnKth20Xnt7zSVu2HXM root@mstr1
+The key's randomart image is:
++---[RSA 3072]----+
+|                 |
+|              ...|
+|      .       .o+|
+|     . o   o o o=|
+|      . S o + .+.|
+|        .. . .  o|
+|     + o o  o +oE|
+|  . +.O +o.. B +=|
+|  .==O.++.+== o .|
++----[SHA256]-----+
+ 
+root@mstr1:~# cat /root/.ssh/id_rsa.pub
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDRnvFPsKUjIQw3uQYcpYlfNUBSFHo5c/O6FKBomFn7LZ7k35DvZsJNv9IOpMvDb2LYHI5j9KmvCRVE+LynE3ffIzA/C4ywIm6lv1kGXYO768YyK5S7Om3/tSbav28Zh+hisCA6sgLSYi2zaKsk5FoWOoQFmoyZI9VA86Dd0YIHIminpixZp7Rq5SpnzZCjqz8ye01CozxSfh+/hvgF+BxIKNbDOB3b+QzY6BoWmOA1hWcswrOqkIjATA/IYg66de7IKun0rmtnADJ7kLS0u+T9/1GZIJJ4MbqCE/mQm+Icmzs028ulPI91MgiNwEp4/Mn+oSjIs7xm4H2QwFnPRcalHYPETrVO/2x/dCDla1FgV+oULJj9UHTpNGCxjKXAZ1AcRtKjSo5vdtvwDeqZ/fbCWufm5k3LMgE6KXn5F4/exslzjAXFH4cwLTnCtry9QJwLdJYzjB22IZUCmqCKI+3HiMt4lyck3KXFpEw+Hk8ztPmgPqHyOAbmAS+QXg7jDkU= root@mstr1
+root@mstr1:~# cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+root@mstr1:~# cat ~/.ssh/authorized_keys
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDRnvFPsKUjIQw3uQYcpYlfNUBSFHo5c/O6FKBomFn7LZ7k35DvZsJNv9IOpMvDb2LYHI5j9KmvCRVE+LynE3ffIzA/C4ywIm6lv1kGXYO768YyK5S7Om3/tSbav28Zh+hisCA6sgLSYi2zaKsk5FoWOoQFmoyZI9VA86Dd0YIHIminpixZp7Rq5SpnzZCjqz8ye01CozxSfh+/hvgF+BxIKNbDOB3b+QzY6BoWmOA1hWcswrOqkIjATA/IYg66de7IKun0rmtnADJ7kLS0u+T9/1GZIJJ4MbqCE/mQm+Icmzs028ulPI91MgiNwEp4/Mn+oSjIs7xm4H2QwFnPRcalHYPETrVO/2x/dCDla1FgV+oULJj9UHTpNGCxjKXAZ1AcRtKjSo5vdtvwDeqZ/fbCWufm5k3LMgE6KXn5F4/exslzjAXFH4cwLTnCtry9QJwLdJYzjB22IZUCmqCKI+3HiMt4lyck3KXFpEw+Hk8ztPmgPqHyOAbmAS+QXg7jDkU= root@mstr1 
+Add the hostname into the hosts file
+root@mstr1:~# cat /etc/hosts
+127.0.0.1 localhost
+127.0.1.1 mstr1.aibl.com mstr1
+172.21.1.21 mstr1.aibl.com mstr1
+172.21.1.16 wrk1.aibl.com wrk1
+172.21.1.17 wrk2.aibl.com wrk2
+
+root@wrk1:~#  vi /root/.ssh/authorized_keys
+paste the above key
+Finaly Test the connection.
+root@mstr1:~# ssh 172.21.1.16
+---------------------------
+root@wrk2:~#  vi /root/.ssh/authorized_keys
+paste the above key
+Finaly Test the connection.
+root@mstr1:~# ssh 172.21.1.16
+
+
+Final Architechture
+                     Users
+                        |
+                 Public Load Balancer
+               (HAProxy / F5 / Nginx)
+                        |
+          +-------------------------------+
+          |                               |
+    Master Node 1                  Master Node 2
+          |                               |
+          +------------Master Node 3-------+
+                    |
+             etcd Cluster (HA)
+                    |
+      -------------------------------
+      |             |              |
+ Worker Node1  Worker Node2  Worker Node3
+      |             |              |
+      -------------------------------
+                CNI Network
+           (Calico / Cilium)
+                    |
+          Ingress Controller
+           (NGINX / Traefik)
+                    |
+          Applications & Services
