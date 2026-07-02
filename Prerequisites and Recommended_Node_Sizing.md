@@ -203,7 +203,7 @@ done
 ssh root@wrk1.aibl.com
 ```
 
-##Software Requirements
+## Software Requirements
 Ubuntu Server 22.04 LTS or 24.04 LTS
 
 Static IP addresses assigned to all nodes
