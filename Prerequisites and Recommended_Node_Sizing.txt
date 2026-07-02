@@ -1,114 +1,72 @@
-Prerequisites and Recommended Node Sizing for Cluster Setup
-•	8 servers running an Ubuntu Ubuntu 26.04 LTS OS
-•	Minimum 8 GB RAM and 2 Core CPUs on each node
-•	A root password configured on each server
-I will use the following setup to demonstrate a three-node master & three node worker Kubernetes cluster
-Kubernetes Cluster Node Information
-Server Type	Hostname	Host IP	OSName 	Spec
-Master	mstr1.aibl.com	172.21.1.167	ubuntu server 26.04LTS	8GB RAM,2vcpu
-Master	mstr2.aibl.com	172.21.1.168	ubuntu server 26.04LTS	8GB RAM,2vcpu
-Master	mstr3.aibl.com	172.21.1.169	ubuntu server 26.04LTS	8GB RAM,2vcpu
-Worker	wrk1.aibl.com	172.21.1.170	ubuntu server 26.04LTS	8GB RAM,2vcpu
-Worker	wrk2.aibl.com	172.21.1.171	ubuntu server 26.04LTS	8GB RAM,2vcpu
-Worker	wrk3.aibl.com	172.21.1.172	ubuntu server 26.04LTS	8GB RAM,4vcpu
-Proxy	HAProxy.aibl.com 172.21.1.173	ubuntu server 26.04LTS	8GB RAM,4vcpu
-Storage	Nfs.aibl.com	172.21.1.174	ubuntu server 26.04LTS	8GB RAM,4vcpu
+# Kubernetes High Availability Cluster Setup Guide
 
-Install all the OS with required Packages
-Step 1: Setting up Static IP address on Ubuntu Server 22.04
-Login to your Ubuntu server 22.04, look for the netplan configuration file. It is located under /etc/netplan directory.
-$ cd /etc/netplan/
-$ls
--rw-r--r-- 1 root root 116 Oct 12 04:03 00-installer-config.yaml
+## 📋 Table of Contents
+1. [Prerequisites](#prerequisites)
+2. [Hardware Requirements](#hardware-requirements)
+3. [Network Configuration](#network-configuration)
+4. [Software Requirements](#software-requirements)
+5. [Cluster Architecture](#cluster-architecture)
+6. [Step-by-Step Installation](#step-by-step-installation)
+7. [High Availability Configuration](#high-availability-configuration)
+8. [Verification & Testing](#verification--testing)
+9. [Troubleshooting](#troubleshooting)
 
-Now, to configure static ip in place of dhcp, edit netplan configuration file using vi or nano editor and add the following content.
+---
 
-$ sudo vi 00-installer-config.yaml
-# This is the network config written by 'subiquity'
-network:
-  ethernets:
-    enp0s3:
-          addresses:
-            - 172.21.1.15/24
-          nameservers:
-            addresses: [8.8.8.8]
-          routes:
-            - to: default
-              via: 172.21.1.1
-  version: 2
+## 1. Prerequisites
 
-save and close the file.
+### System Requirements
+- **8 Servers** running Ubuntu 26.04 LTS OS
+- **Minimum Specifications per Node**:
+  - RAM: 8 GB
+  - CPU: 2 Cores
+- **Root Password** configured on each server
+- **Static IP Addresses** assigned to all nodes
+- **Hostname Resolution** configured (DNS or /etc/hosts)
+- **All nodes** must be reachable between each other
 
-To make above changes into the effect the apply these changes using following netplan command,
-$ sudo netplan apply
-Run following ip command to view the ip address on interface,
-$ ip addr show enp0s3
-To view the default route, run
-root@testsvr01:~# ip addr show ens160
-2: ens160: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
-    link/ether 00:0c:29:21:55:ad brd ff:ff:ff:ff:ff:ff
-    altname enp3s0
-    inet 172.21.1.15/24 brd 172.21.1.255 scope global ens160
-       valid_lft forever preferred_lft forever
-    inet6 fe80::20c:29ff:fe21:55ad/64 scope link
-       valid_lft forever preferred_lft forever
+### Recommended Node Sizing
 
-$ ip route show
-root@testsvr01:~# ip route show
-default via 172.21.1.1 dev ens160 proto static
-172.21.1.0/24 dev ens160 proto kernel scope link src 172.21.1.15
-Step 3: Check the OS, Hardware Configurations & Network connectivity (Passwordless ssh)
+| Node Type | Hostname | Host IP | OS | Specs |
+|-----------|----------|---------|-----|-------|
+| **Master** | mstr1.aibl.com | 172.21.1.167 | Ubuntu 26.04 LTS | 8GB RAM, 2 vCPUs |
+| **Master** | mstr2.aibl.com | 172.21.1.168 | Ubuntu 26.04 LTS | 8GB RAM, 2 vCPUs |
+| **Master** | mstr3.aibl.com | 172.21.1.169 | Ubuntu 26.04 LTS | 8GB RAM, 2 vCPUs |
+| **Worker** | wrk1.aibl.com | 172.21.1.170 | Ubuntu 26.04 LTS | 8GB RAM, 2 vCPUs |
+| **Worker** | wrk2.aibl.com | 172.21.1.171 | Ubuntu 26.04 LTS | 8GB RAM, 2 vCPUs |
+| **Worker** | wrk3.aibl.com | 172.21.1.172 | Ubuntu 26.04 LTS | 8GB RAM, 4 vCPUs |
+| **Proxy** | HAProxy.aibl.com | 172.21.1.173 | Ubuntu 26.04 LTS | 8GB RAM, 4 vCPUs |
+| **Storage** | Nfs.aibl.com | 172.21.1.174 | Ubuntu 26.04 LTS | 8GB RAM, 4 vCPUs |
 
-Access all VMs
-Here we create an SSH key pair for the vagrant user who we are logged in as. We will copy the public key 
-of this pair to the other master and both workers to permit us to use password-less SSH (and SCP) go get from master-1 to these other nodes  
-root@mstr1:~# ssh-keygen
-Generating public/private rsa key pair.
-Enter file in which to save the key (/root/.ssh/id_rsa):
-Enter passphrase (empty for no passphrase):
-Enter same passphrase again:
-Your identification has been saved in /root/.ssh/id_rsa
-Your public key has been saved in /root/.ssh/id_rsa.pub
-The key fingerprint is:
-SHA256:SH/ZS1lbO12cvH/iqIsrqfptsnKth20Xnt7zSVu2HXM root@mstr1
-The key's randomart image is:
-+---[RSA 3072]----+
-|                 |
-|              ...|
-|      .       .o+|
-|     . o   o o o=|
-|      . S o + .+.|
-|        .. . .  o|
-|     + o o  o +oE|
-|  . +.O +o.. B +=|
-|  .==O.++.+== o .|
-+----[SHA256]-----+
- 
-root@mstr1:~# cat /root/.ssh/id_rsa.pub
-ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDRnvFPsKUjIQw3uQYcpYlfNUBSFHo5c/O6FKBomFn7LZ7k35DvZsJNv9IOpMvDb2LYHI5j9KmvCRVE+LynE3ffIzA/C4ywIm6lv1kGXYO768YyK5S7Om3/tSbav28Zh+hisCA6sgLSYi2zaKsk5FoWOoQFmoyZI9VA86Dd0YIHIminpixZp7Rq5SpnzZCjqz8ye01CozxSfh+/hvgF+BxIKNbDOB3b+QzY6BoWmOA1hWcswrOqkIjATA/IYg66de7IKun0rmtnADJ7kLS0u+T9/1GZIJJ4MbqCE/mQm+Icmzs028ulPI91MgiNwEp4/Mn+oSjIs7xm4H2QwFnPRcalHYPETrVO/2x/dCDla1FgV+oULJj9UHTpNGCxjKXAZ1AcRtKjSo5vdtvwDeqZ/fbCWufm5k3LMgE6KXn5F4/exslzjAXFH4cwLTnCtry9QJwLdJYzjB22IZUCmqCKI+3HiMt4lyck3KXFpEw+Hk8ztPmgPqHyOAbmAS+QXg7jDkU= root@mstr1
-root@mstr1:~# cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
-root@mstr1:~# cat ~/.ssh/authorized_keys
-ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDRnvFPsKUjIQw3uQYcpYlfNUBSFHo5c/O6FKBomFn7LZ7k35DvZsJNv9IOpMvDb2LYHI5j9KmvCRVE+LynE3ffIzA/C4ywIm6lv1kGXYO768YyK5S7Om3/tSbav28Zh+hisCA6sgLSYi2zaKsk5FoWOoQFmoyZI9VA86Dd0YIHIminpixZp7Rq5SpnzZCjqz8ye01CozxSfh+/hvgF+BxIKNbDOB3b+QzY6BoWmOA1hWcswrOqkIjATA/IYg66de7IKun0rmtnADJ7kLS0u+T9/1GZIJJ4MbqCE/mQm+Icmzs028ulPI91MgiNwEp4/Mn+oSjIs7xm4H2QwFnPRcalHYPETrVO/2x/dCDla1FgV+oULJj9UHTpNGCxjKXAZ1AcRtKjSo5vdtvwDeqZ/fbCWufm5k3LMgE6KXn5F4/exslzjAXFH4cwLTnCtry9QJwLdJYzjB22IZUCmqCKI+3HiMt4lyck3KXFpEw+Hk8ztPmgPqHyOAbmAS+QXg7jDkU= root@mstr1 
-Add the hostname into the hosts file
-root@mstr1:~# cat /etc/hosts
-127.0.0.1 localhost
-127.0.1.1 mstr1.aibl.com mstr1
-172.21.1.21 mstr1.aibl.com mstr1
-172.21.1.16 wrk1.aibl.com wrk1
-172.21.1.17 wrk2.aibl.com wrk2
+---
 
-root@wrk1:~#  vi /root/.ssh/authorized_keys
-paste the above key
-Finaly Test the connection.
-root@mstr1:~# ssh 172.21.1.16
----------------------------
-root@wrk2:~#  vi /root/.ssh/authorized_keys
-paste the above key
-Finaly Test the connection.
-root@mstr1:~# ssh 172.21.1.16
+## 2. Hardware Requirements
 
+### Minimum vs Recommended
 
-Final Architechture
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| **Master Node RAM** | 2 GB | 8+ GB |
+| **Master Node CPU** | 2 cores | 4+ cores |
+| **Worker Node RAM** | 2 GB | 8+ GB |
+| **Worker Node CPU** | 2 cores | 4+ cores |
+| **Storage (Master)** | 20 GB SSD | 50+ GB SSD |
+| **Storage (Worker)** | 20 GB SSD | 100+ GB SSD |
+| **Network** | 1 Gbps | 10 Gbps |
+
+### Storage Requirements
+- **etcd Database**: 10 GB minimum
+- **Container Images**: 20 GB minimum
+- **Application Data**: Varies based on workload
+- **Logs**: 10 GB minimum
+
+---
+
+## 3. Network Configuration
+
+### Network Topology
+
+```
                      Users
                         |
                  Public Load Balancer
@@ -134,3 +92,123 @@ Final Architechture
            (NGINX / Traefik)
                     |
           Applications & Services
+```
+
+### IP Addressing Scheme
+
+| Node | IP Address | Purpose |
+|------|------------|---------|
+| mstr1.aibl.com | 172.21.1.167 | Master Node 1 |
+| mstr2.aibl.com | 172.21.1.168 | Master Node 2 |
+| mstr3.aibl.com | 172.21.1.169 | Master Node 3 |
+| wrk1.aibl.com | 172.21.1.170 | Worker Node 1 |
+| wrk2.aibl.com | 172.21.1.171 | Worker Node 2 |
+| wrk3.aibl.com | 172.21.1.172 | Worker Node 3 |
+| HAProxy.aibl.com | 172.21.1.173 | Load Balancer |
+| Nfs.aibl.com | 172.21.1.174 | NFS Storage |
+| **VIP** | 172.21.1.175 | Virtual IP (HA) |
+| **Service CIDR** | 10.96.0.0/12 | Kubernetes Services |
+| **Pod CIDR** | 10.244.0.0/16 | Kubernetes Pods |
+
+### Network Ports to Open
+
+#### Master Nodes
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| 6443 | TCP | Kubernetes API Server |
+| 2379-2380 | TCP | etcd Server Client API |
+| 10250 | TCP | Kubelet API |
+| 10251 | TCP | kube-scheduler |
+| 10252 | TCP | kube-controller-manager |
+| 10259 | TCP | kube-scheduler (secure) |
+| 10257 | TCP | kube-controller-manager (secure) |
+
+#### Worker Nodes
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| 10250 | TCP | Kubelet API |
+| 30000-32767 | TCP | NodePort Services |
+
+#### All Nodes
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| 22 | TCP | SSH |
+| 179 | TCP | Calico BGP |
+| 4789 | UDP | VXLAN (Calico) |
+| 5473 | TCP | Calico Typha |
+| 9099 | TCP | Calico Felix |
+
+### Network Configuration Steps
+
+#### Step 1: Configure Static IP using Netplan
+
+```yaml
+# /etc/netplan/00-installer-config.yaml
+network:
+  ethernets:
+    enp0s3:
+      addresses:
+        - 172.21.1.167/24
+      nameservers:
+        addresses: [8.8.8.8, 1.1.1.1]
+      routes:
+        - to: default
+          via: 172.21.1.1
+  version: 2
+```
+
+```bash
+# Apply netplan configuration
+sudo netplan apply
+
+# Verify IP address
+ip addr show enp0s3
+
+# Verify default route
+ip route show
+```
+
+#### Step 2: Configure Hostname Resolution
+
+```bash
+# On each node, update /etc/hosts
+sudo cat >> /etc/hosts << EOF
+172.21.1.167 mstr1.aibl.com mstr1
+172.21.1.168 mstr2.aibl.com mstr2
+172.21.1.169 mstr3.aibl.com mstr3
+172.21.1.170 wrk1.aibl.com wrk1
+172.21.1.171 wrk2.aibl.com wrk2
+172.21.1.172 wrk3.aibl.com wrk3
+172.21.1.173 haproxy.aibl.com haproxy
+172.21.1.174 nfs.aibl.com nfs
+172.21.1.175 vip.aibl.com vip
+EOF
+
+# Set hostname
+sudo hostnamectl set-hostname mstr1.aibl.com
+```
+
+#### Step 3: Setup Passwordless SSH
+
+```bash
+# On master node (mstr1)
+ssh-keygen -t rsa -b 4096 -N "" -f ~/.ssh/id_rsa
+
+# Copy public key to all nodes
+for node in mstr1 mstr2 mstr3 wrk1 wrk2 wrk3 haproxy nfs; do
+    ssh-copy-id root@$node.aibl.com
+done
+
+# Test connectivity
+ssh root@wrk1.aibl.com
+```
+
+##Software Requirements
+Ubuntu Server 22.04 LTS or 24.04 LTS
+
+Static IP addresses assigned to all nodes
+
+Hostname resolution configured (DNS or /etc/hosts)
+
+All nodes must be reachable between each other
+
